@@ -162,7 +162,7 @@
     var msg = '', cls = 'banner';
     if (api.mode === 'broken') {
       cls += ' err';
-      msg = 'Falta el archivo <b>js/vendor/supabase-lite.js</b> en la web. Súbelo junto al resto de archivos y recarga.';
+      msg = 'Falta el archivo <b>supabase-lite.js</b> en la web. Súbelo junto al resto de archivos y recarga.';
     } else if (api.mode === 'demo') {
       msg = '<b>Modo demostración.</b> Los datos viven solo en esta pestaña y desaparecen al recargar. Escribe cualquier correo y contraseña para entrar. Con la palabra «admin» en el correo entras como moderador.';
     } else if (api.urlError) {
