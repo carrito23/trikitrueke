@@ -8,7 +8,7 @@
   'use strict';
 
   var cfg = window.TRIKI_CONFIG || {};
-  var DOC_VERSION = '2026-10';
+  var DOC_VERSION = '2026-10-31';
   var MAX_PHOTO_PX = 1200;
   var PAGE_SIZE = 24;
 
@@ -45,6 +45,7 @@
       [/listing_cap/, 'Has llegado al máximo de 40 anuncios. Borra o marca como cambiado alguno.'],
       [/rate_limit_offers/, 'Has llegado al límite de 20 propuestas al día.'],
       [/rate_limit_messages/, 'Has llegado al límite de mensajes de hoy.'],
+      [/rate_limit_attachments/, 'Has llegado al límite de 30 fotos de chat al día.'],
       [/rate_limit_catalog/, 'Solo se pueden crear 3 categorías o zonas al día.'],
       [/offer_closed/, 'Esta propuesta ya está cerrada y no admite más mensajes.'],
       [/offers_one_pending/, 'Ya tienes una propuesta pendiente en este anuncio.'],
@@ -95,6 +96,27 @@
       };
       img.src = url;
     });
+  }
+
+
+  // Punto de encuentro: coordenadas redondeadas a ~11 m y/o un texto. Devuelve null si no hay nada.
+  function cleanPlace(p) {
+    if (!p) return null;
+    var label = String(p.label || '').trim().slice(0, 100);
+    var lat = null, lng = null;
+    if (p.lat != null && p.lng != null && isFinite(p.lat) && isFinite(p.lng)) {
+      lat = Math.round(Number(p.lat) * 1e4) / 1e4;
+      lng = Math.round(Number(p.lng) * 1e4) / 1e4;
+      if (Math.abs(lat) > 90 || Math.abs(lng) > 180) { lat = null; lng = null; }
+    }
+    if (lat == null && !label) return null;
+    return { lat: lat, lng: lng, label: label };
+  }
+  function placeFromRow(m) {
+    var lat = m.place_lat != null ? Number(m.place_lat) : null, lng = m.place_lng != null ? Number(m.place_lng) : null;
+    var label = m.place_label || '';
+    if (lat == null && !label) return null;
+    return { lat: isFinite(lat) ? lat : null, lng: isFinite(lng) ? lng : null, label: label };
   }
 
   var SEED_CATS = [
@@ -327,6 +349,10 @@
       if (!r.data) throw new Error('No tienes permiso para hacer esto.');
     };
     api.deleteListing = async function (row) {
+      try {
+        var offs = await sb.from('offers').select('id').eq('listing_id', row.id);
+        await removeChatFiles((offs.data || []).map(function (o) { return o.id; }));
+      } catch (e) { /* si falla, se sigue con el borrado */ }
       var r = await sb.from('listings').delete().eq('id', row.id).select('id').maybeSingle();
       if (r.error) throw r.error;
       if (!r.data) throw new Error('No tienes permiso para hacer esto.');
@@ -362,17 +388,42 @@
         };
       });
     };
+    var CHAT = 'chat-photos';
     api.getThread = async function (offerId) {
-      var r = await sb.from('offer_messages').select('id,sender_id,body,created_at,profiles(alias)')
+      var r = await sb.from('offer_messages').select('id,sender_id,body,attachment_path,place_lat,place_lng,place_label,created_at,profiles(alias)')
         .eq('offer_id', offerId).order('created_at', { ascending: true });
       if (r.error) throw r.error;
-      return (r.data || []).map(function (m) {
-        return { id: m.id, mine: m.sender_id === api.user.id, alias: (m.profiles && m.profiles.alias) || '', body: m.body, created_at: m.created_at };
+      var rows = r.data || [];
+      var urls = {};
+      var paths = rows.filter(function (m) { return m.attachment_path; }).map(function (m) { return m.attachment_path; });
+      if (paths.length) {
+        var sg = await sb.storage.from(CHAT).createSignedUrls(paths, 3600);
+        if (!sg.error && sg.data) sg.data.forEach(function (x) { if (x.signedUrl && !x.error) urls[x.path] = x.signedUrl; });
+      }
+      return rows.map(function (m) {
+        return { id: m.id, mine: m.sender_id === api.user.id, alias: (m.profiles && m.profiles.alias) || '', body: m.body || '', created_at: m.created_at,
+          hasPhoto: !!m.attachment_path, photoUrl: m.attachment_path ? (urls[m.attachment_path] || '') : '', place: placeFromRow(m) };
       });
     };
-    api.addMessage = async function (offerId, body) {
-      var r = await sb.from('offer_messages').insert({ offer_id: offerId, sender_id: api.user.id, body: body });
-      if (r.error) throw r.error;
+    // m = { body, file (foto opcional), place ({lat,lng,label} opcional) }
+    api.addMessage = async function (offerId, m) {
+      if (typeof m === 'string') m = { body: m };
+      var row = { offer_id: offerId, sender_id: api.user.id, body: (m.body || '').trim() };
+      var pl = cleanPlace(m.place);
+      if (pl) { row.place_lat = pl.lat; row.place_lng = pl.lng; row.place_label = pl.label || null; }
+      var path = null;
+      if (m.file) {
+        var blob = await compressImage(m.file);
+        path = offerId + '/' + uuid() + '.jpg';
+        var up = await sb.storage.from(CHAT).upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+        if (up.error) throw up.error;
+        row.attachment_path = path;
+      }
+      var r = await sb.from('offer_messages').insert(row);
+      if (r.error) {
+        if (path) { try { await sb.storage.from(CHAT).remove([path]); } catch (e) { /* se queda huérfana: no es accesible */ } }
+        throw r.error;
+      }
     };
     api.setOfferStatus = async function (id, status) {
       var r = await sb.from('offers').update({ status: status }).eq('id', id).select('id').maybeSingle();
@@ -448,7 +499,18 @@
         denuncias_enviadas: res[3].data || []
       };
     };
+    // Quita del almacenamiento las fotos de chat de las conversaciones que van a desaparecer.
+    async function removeChatFiles(offerIds) {
+      if (!offerIds.length) return;
+      var q = await sb.from('offer_messages').select('attachment_path').in('offer_id', offerIds).not('attachment_path', 'is', null);
+      var paths = (q.data || []).map(function (x) { return x.attachment_path; });
+      if (paths.length) await sb.storage.from(CHAT).remove(paths);
+    }
     api.deleteAccount = async function () {
+      try {
+        var mine = await sb.from('offers').select('id');
+        await removeChatFiles((mine.data || []).map(function (o) { return o.id; }));
+      } catch (e) { /* si falla, se sigue con el borrado de la cuenta */ }
       var folder = api.user.id;
       var l = await sb.storage.from('photos').list(folder, { limit: 1000 });
       if (!l.error && l.data && l.data.length) {
@@ -626,15 +688,19 @@
     };
     api.getThread = function (offerId) {
       return delay(messages.filter(function (m) { return m.offer_id === offerId; }).map(function (m) {
-        return { id: m.id, mine: m.sender_id === api.user.id, alias: aliasOf(m.sender_id), body: m.body, created_at: m.created_at };
+        return { id: m.id, mine: m.sender_id === api.user.id, alias: aliasOf(m.sender_id), body: m.body, created_at: m.created_at,
+          hasPhoto: !!m.photoUrl, photoUrl: m.photoUrl || '', place: m.place || null };
       }));
     };
-    api.addMessage = function (offerId, body) {
+    api.addMessage = async function (offerId, m) {
+      if (typeof m === 'string') m = { body: m };
       var o = offers.filter(function (x) { return x.id === offerId; })[0];
-      if (!o) return fail('No tienes permiso para hacer esto.');
-      if (o.status === 'declined' || o.status === 'withdrawn') return fail('offer_closed');
-      messages.push({ id: uuid(), offer_id: offerId, sender_id: api.user.id, body: body, created_at: new Date().toISOString() });
-      return delay();
+      if (!o) throw new Error('No tienes permiso para hacer esto.');
+      if (o.status === 'declined' || o.status === 'withdrawn') throw new Error('offer_closed');
+      var photoUrl = '';
+      if (m.file) photoUrl = URL.createObjectURL(await compressImage(m.file));
+      await delay();
+      messages.push({ id: uuid(), offer_id: offerId, sender_id: api.user.id, body: (m.body || '').trim(), photoUrl: photoUrl, place: cleanPlace(m.place), created_at: new Date().toISOString() });
     };
     api.setOfferStatus = function (id, status) {
       var o = offers.filter(function (x) { return x.id === id; })[0];

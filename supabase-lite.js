@@ -234,6 +234,8 @@
     Query.prototype.update = function (row) { this.method = 'PATCH'; this.body = JSON.stringify(row); return this; };
     Query.prototype.delete = function () { this.method = 'DELETE'; return this; };
     Query.prototype.eq = function (c, v) { this.params.push([c, 'eq.' + v]); return this; };
+    Query.prototype.in = function (c, vals) { this.params.push([c, 'in.(' + vals.map(function (v) { return String(v).replace(/[(),"]/g, ''); }).join(',') + ')']); return this; };
+    Query.prototype.not = function (c, op, v) { this.params.push([c, 'not.' + op + '.' + (v === null ? 'null' : v)]); return this; };
     Query.prototype.ilike = function (c, v) { this.params.push([c, 'ilike.' + v]); return this; };
     Query.prototype.or = function (expr) { this.params.push(['or', '(' + expr + ')']); return this; };
     Query.prototype.order = function (c, o) { this.orders.push(c + '.' + (o && o.ascending === false ? 'desc' : 'asc')); return this; };
@@ -325,6 +327,20 @@
             body: JSON.stringify({ prefix: prefix || '', limit: (opts && opts.limit) || 100, offset: 0, sortBy: { column: 'name', order: 'asc' } })
           }).then(function (r) { return r.ok ? { data: r.body || [], error: null } : { data: null, error: err(r) }; },
                   function (e) { return { data: null, error: { message: e.message } }; });
+        },
+        createSignedUrls: function (paths, expiresIn) {
+          return call('/object/sign/' + bucket, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ expiresIn: expiresIn || 3600, paths: paths })
+          }).then(function (r) {
+            if (!r.ok) return { data: null, error: err(r) };
+            var out = (Array.isArray(r.body) ? r.body : []).map(function (x) {
+              var u = x.signedURL || x.signedUrl || '';
+              if (u && !/^https?:/i.test(u)) u = url + '/storage/v1' + (u.charAt(0) === '/' ? '' : '/') + u;
+              return { path: x.path, signedUrl: u, error: x.error || null };
+            });
+            return { data: out, error: null };
+          }, function (e) { return { data: null, error: { message: e.message } }; });
         },
         getPublicUrl: function (path) {
           return { data: { publicUrl: url + '/storage/v1/object/public/' + bucket + '/' + path.split('/').map(encodeURIComponent).join('/') } };

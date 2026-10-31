@@ -98,9 +98,33 @@ create table if not exists public.offer_messages (
   id          uuid primary key default gen_random_uuid(),
   offer_id    uuid not null references public.offers(id) on delete cascade,
   sender_id   uuid not null references public.profiles(id) on delete cascade,
-  body        text not null check (char_length(btrim(body)) between 1 and 500),
+  body        text not null default '',
+  attachment_path text,          -- foto adjunta: bucket 'chat-photos', ruta <id-de-propuesta>/<archivo>.jpg
+  place_lat   double precision,  -- punto de encuentro compartido (opcional)
+  place_lng   double precision,
+  place_label text,
   created_at  timestamptz not null default now()
 );
+-- Para bases creadas con una versión anterior: añade lo que falte y renueva las reglas.
+alter table public.offer_messages add column if not exists attachment_path text;
+alter table public.offer_messages add column if not exists place_lat double precision;
+alter table public.offer_messages add column if not exists place_lng double precision;
+alter table public.offer_messages add column if not exists place_label text;
+alter table public.offer_messages alter column body set default '';
+alter table public.offer_messages drop constraint if exists offer_messages_body_check;
+alter table public.offer_messages drop constraint if exists offer_messages_body_len;
+alter table public.offer_messages drop constraint if exists offer_messages_attach_chk;
+alter table public.offer_messages drop constraint if exists offer_messages_place_chk;
+alter table public.offer_messages drop constraint if exists offer_messages_content_chk;
+alter table public.offer_messages add constraint offer_messages_body_len check (char_length(body) <= 500);
+alter table public.offer_messages add constraint offer_messages_attach_chk
+  check (attachment_path is null or (char_length(attachment_path) <= 200 and attachment_path like offer_id::text || '/%'));
+alter table public.offer_messages add constraint offer_messages_place_chk
+  check (((place_lat is null) = (place_lng is null))
+     and (place_lat is null or (place_lat between -90 and 90 and place_lng between -180 and 180))
+     and (place_label is null or char_length(place_label) <= 100));
+alter table public.offer_messages add constraint offer_messages_content_chk
+  check (btrim(body) <> '' or attachment_path is not null or place_lat is not null or btrim(coalesce(place_label, '')) <> '');
 create index if not exists offer_messages_offer_idx on public.offer_messages (offer_id, created_at);
 
 create table if not exists public.reports (
@@ -135,6 +159,16 @@ language sql stable security definer set search_path = public as $$
     select 1 from public.offers o join public.listings l on l.id = o.listing_id
     where o.id = oid and (o.from_user = auth.uid() or l.user_id = auth.uid())
   );
+$$;
+
+-- ¿Puede esta persona usar la carpeta de fotos de esta propuesta? (ruta: <id-de-propuesta>/archivo.jpg)
+create or replace function public.chat_folder_ok(path text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select case
+    when split_part(path, '/', 1) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      then public.is_offer_party(split_part(path, '/', 1)::uuid)
+    else false
+  end;
 $$;
 
 -- ¿Está libre este alias? (la web lo consulta antes de registrar)
@@ -291,6 +325,10 @@ begin
     if (select count(*) from public.offer_messages where sender_id = new.sender_id and created_at > now() - interval '1 day') >= 100 then
       raise exception 'rate_limit_messages';
     end if;
+    if new.attachment_path is not null and
+       (select count(*) from public.offer_messages where sender_id = new.sender_id and attachment_path is not null and created_at > now() - interval '1 day') >= 30 then
+      raise exception 'rate_limit_attachments';
+    end if;
   end if;
   return new;
 end $$;
@@ -441,6 +479,7 @@ grant execute on function public.alias_available(text) to anon, authenticated;
 grant execute on function public.is_admin() to authenticated;
 revoke all on function public.delete_my_account() from public, anon;
 grant execute on function public.delete_my_account() to authenticated;
+grant execute on function public.chat_folder_ok(text) to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 7. FOTOS (almacenamiento)
@@ -465,6 +504,27 @@ create policy photos_insert_own on storage.objects for insert to authenticated
 drop policy if exists photos_delete_own on storage.objects;
 create policy photos_delete_own on storage.objects for delete to authenticated
   using (bucket_id = 'photos' and ((storage.foldername(name))[1] = auth.uid()::text or public.is_admin()));
+
+-- Fotos del chat: depósito PRIVADO. Solo las dos personas de la propuesta pueden
+-- verlas, subirlas o borrarlas (ni siquiera moderación). Ruta: <id-de-propuesta>/archivo.jpg
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('chat-photos', 'chat-photos', false, 2097152, array['image/jpeg','image/png','image/webp'])
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists chat_select on storage.objects;
+create policy chat_select on storage.objects for select to authenticated
+  using (bucket_id = 'chat-photos' and public.chat_folder_ok(name));
+
+drop policy if exists chat_insert on storage.objects;
+create policy chat_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'chat-photos' and public.chat_folder_ok(name));
+
+drop policy if exists chat_delete on storage.objects;
+create policy chat_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'chat-photos' and public.chat_folder_ok(name));
 
 -- ---------------------------------------------------------------------
 -- 8. DATOS INICIALES

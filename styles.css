@@ -299,3 +299,37 @@ a{color:var(--brand-text)}
 .legal .tablewrap{overflow-x:auto}
 .legal .warn{background:var(--warn-bg); color:var(--warn-ink); border-radius:12px; padding:12px 14px; font-size:.92rem}
 mark.ph{background:#FFE08A; color:#2A2000; padding:0 4px; border-radius:4px; font-weight:600}
+
+/* Ampliar foto, fotos y punto de encuentro en el chat */
+.zoom{position:absolute; right:10px; bottom:10px; width:40px; height:40px; border-radius:12px; border:0; cursor:zoom-in; display:grid; place-items:center; background:rgba(8,20,22,.62); color:#fff}
+.zoom svg{width:20px; height:20px}
+.zoom:hover{background:rgba(8,20,22,.8)}
+.detail-ph:has(.zoom) img{cursor:zoom-in}
+dialog.lightbox{width:min(1100px,calc(100vw - 16px)); max-height:calc(100vh - 16px); padding:0; border:0; background:#0B1416; place-items:center; overflow:hidden}
+dialog.lightbox[open]{display:grid}
+dialog.lightbox img{max-width:100%; max-height:calc(100vh - 16px); object-fit:contain; display:block; cursor:zoom-out}
+dialog.lightbox .x{position:absolute; top:10px; right:10px; z-index:2; background:rgba(8,20,22,.7); color:#fff; border-color:rgba(255,255,255,.35)}
+.hint{color:var(--muted); font-size:.82rem; margin:0}
+.muted{color:var(--muted); font-size:.85rem; margin:4px 0 0}
+.tools{gap:8px; flex-wrap:wrap}
+.attach{display:flex; flex-wrap:wrap; gap:8px}
+.attach:empty{display:none}
+.chip-att{display:inline-flex; align-items:center; gap:8px; max-width:100%; padding:4px 6px 4px 8px; border:1px solid var(--line); border-radius:999px; background:var(--soft); font-size:.88rem}
+.chip-att img{width:28px; height:28px; border-radius:50%; object-fit:cover}
+.chip-att svg{width:18px; height:18px; flex:none}
+.chip-att span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.chip-att button{border:0; background:transparent; color:inherit; font-size:1.2rem; line-height:1; cursor:pointer; width:28px; height:28px; border-radius:50%}
+.chip-att button:hover{background:var(--line)}
+.chatimg{display:block; margin-top:6px; padding:0; border:0; background:transparent; cursor:zoom-in; border-radius:10px; overflow:hidden; max-width:100%}
+.chatimg img{display:block; max-width:min(260px,100%); max-height:220px; height:auto; border-radius:10px}
+.place{display:flex; gap:8px; align-items:flex-start; margin-top:6px; padding:8px 10px; border-radius:10px; background:rgba(255,255,255,.55); color:var(--ink)}
+.bub.me .place{background:rgba(255,255,255,.9)}
+.place svg{width:20px; height:20px; flex:none; margin-top:1px}
+.place small{display:block; color:var(--muted); font-size:.75rem; margin:0}
+.place a{display:inline-block; margin-top:2px; font-weight:600; color:var(--link,#B45309)}
+:root[data-theme="dark"] .place{background:rgba(255,255,255,.08)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .place{background:rgba(255,255,255,.08)}}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .bub.me .place{background:rgba(255,255,255,.9)}}
+.bub.me .place{color:#1F2A2E}
+.bub.me .place small{color:#4A5A5E}
+.place b{display:block}

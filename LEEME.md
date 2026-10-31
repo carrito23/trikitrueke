@@ -28,8 +28,13 @@ En `aviso-legal.html`, `privacidad.html`, `cookies.html` y `normas.html` busca l
 - Quita `<meta name="robots" content="noindex">` de los HTML cuando quieras aparecer en Google.
 - Comprueba en el navegador (F12 → Application) que no se guardan cookies, solo el elemento de sesión `sb-trikitrueke-auth`.
 - `www.trikitrueke.es`: en Strato, CNAME de `www` → `carrito23.github.io`, y en GitHub Pages vuelve a guardar el dominio y marca *Enforce HTTPS*.
-- Fuentes propias (opcional): sube `figtree-latin-wght-normal.woff2` y `bricolage-grotesque-latin-wght-normal.woff2` junto al resto. Si no, usa fuentes del sistema.
+- Fuentes propias (opcional): copia `figtree-latin-wght-normal.woff2` y `bricolage-grotesque-latin-wght-normal.woff2` en `fonts/`. Si no, usa fuentes del sistema.
 
 ## Qué no hay todavía
 - Avisos por correo de nuevas propuestas o mensajes (solo el contador en la web).
 - Mensajes no leídos.
+
+## Actualizar una web ya publicada
+1. Supabase → SQL Editor → pega `schema.sql` entero → Run (se puede repetir sin riesgo; añade lo nuevo y no borra datos).
+2. En GitHub, sube los archivos nuevos **sin tocar tu `config.js`** (el de tus claves).
+3. Recarga con Ctrl+F5.

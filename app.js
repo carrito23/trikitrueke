@@ -335,8 +335,20 @@
     var c = catOf(l.category_id);
     return '<div class="ph' + (big ? ' detail-ph' : '') + '" style="--h:' + (parseInt(c.hue, 10) || 200) + '">' +
       (l.photoUrl ? '<img src="' + esc(l.photoUrl) + '" alt="Foto de ' + esc(l.title) + '" loading="lazy">' : ico(c.icon)) +
+      (big && l.photoUrl ? '<button class="zoom" type="button" data-zoom="' + esc(l.photoUrl) + '" data-alt="Foto de ' + esc(l.title) + '" aria-label="Ampliar la foto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg></button>' : '') +
       '<span class="tag">' + esc(c.name) + '</span></div>';
   }
+  // Visor de fotos a pantalla completa (anuncio y chat)
+  function openPhoto(url, alt) {
+    var img = $('#photo-img');
+    img.src = url; img.alt = alt || 'Foto ampliada';
+    openD($('#dlg-photo'));
+  }
+  document.addEventListener('click', function (e) {
+    var z = e.target.closest('[data-zoom]');
+    if (z) { e.preventDefault(); openPhoto(z.dataset.zoom, z.dataset.alt); }
+  });
+  $('#dlg-photo').addEventListener('close', function () { $('#photo-img').removeAttribute('src'); });
   function cardHTML(l) {
     var want = l.want ? esc(l.want) : 'Lo que me propongas';
     var pill = l.open ? '<span class="pill">Escucho ofertas</span>' : '';
@@ -729,17 +741,54 @@
     openD($('#dlg-thread'));
     renderThread();
   }
+  var PIN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>';
+  // Enlace al mapa (OpenStreetMap). Los números se validan porque vienen de otra persona.
+  function mapLink(p) {
+    var lat = Number(p.lat), lng = Number(p.lng);
+    if (p.lat != null && p.lng != null && isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+      return 'https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lng + '#map=17/' + lat + '/' + lng;
+    }
+    return 'https://www.openstreetmap.org/search?query=' + encodeURIComponent(p.label || '');
+  }
+  function placeHTML(p) {
+    var exact = p.lat != null && p.lng != null;
+    return '<div class="place">' + PIN_SVG + '<div><b>' + esc(p.label || 'Punto de encuentro') + '</b>' + (exact ? '<small>Ubicación exacta compartida</small>' : '') +
+      '<a href="' + esc(mapLink(p)) + '" target="_blank" rel="noopener noreferrer">Ver en el mapa</a></div></div>';
+  }
+  function msgHTML(m) {
+    var photo = '';
+    if (m.hasPhoto) {
+      photo = m.photoUrl
+        ? '<button class="chatimg" type="button" data-zoom="' + esc(m.photoUrl) + '" data-alt="Foto enviada por ' + esc(m.mine ? 'ti' : m.alias) + '"><img src="' + esc(m.photoUrl) + '" alt="Foto enviada" loading="lazy"></button>'
+        : '<p class="muted">Foto no disponible.</p>';
+    }
+    return '<div class="bub' + (m.mine ? ' me' : '') + '"><small>' + (m.mine ? 'Tú' : esc(m.alias)) + ' · ' + ago(m.created_at) + '</small>' +
+      (m.body ? '<div>' + esc(m.body) + '</div>' : '') + photo + (m.place ? placeHTML(m.place) : '') + '</div>';
+  }
+  // Borrador del mensaje que se está escribiendo (se conserva al pulsar «Actualizar»)
+  var draft = { id: null, text: '', file: null, previewUrl: '', place: null };
+  function resetDraft(id) {
+    if (draft.previewUrl) URL.revokeObjectURL(draft.previewUrl);
+    draft = { id: id, text: '', file: null, previewUrl: '', place: null };
+  }
+  function renderDraftChips() {
+    var box = $('#t-attach'); if (!box) return;
+    var h = '';
+    if (draft.file) h += '<span class="chip-att"><img src="' + esc(draft.previewUrl) + '" alt="" width="36" height="36"><span>Foto lista</span><button type="button" data-t="rm-photo" aria-label="Quitar la foto">×</button></span>';
+    if (draft.place) h += '<span class="chip-att">' + PIN_SVG + '<span>' + esc(draft.place.label || 'Ubicación actual') + (draft.place.lat != null ? ' (exacta)' : '') + '</span><button type="button" data-t="rm-place" aria-label="Quitar el punto de encuentro">×</button></span>';
+    box.innerHTML = h;
+  }
   async function renderThread() {
     var o = S.thread, body = $('#thread-body');
+    if (draft.id !== o.id) resetDraft(o.id);
+    else if ($('#t-body')) draft.text = $('#t-body').value;
     var msgs = [];
     var loadErr = '';
     try { msgs = await api.getThread(o.id); } catch (e) { loadErr = api.niceError(e); }
     var st = OST[o.status] || OST.pending;
     var open = o.status === 'pending' || o.status === 'accepted';
     var first = '<div class="bub' + (o.role === 'sent' ? ' me' : '') + '"><small>' + (o.role === 'sent' ? 'Tú' : esc(o.other_alias)) + ' · propuesta · ' + ago(o.created_at) + '</small>Ofrece: <b>' + esc(o.offer_text) + '</b>' + (o.message ? '<br>' + esc(o.message) : '') + '</div>';
-    var list = msgs.map(function (m) {
-      return '<div class="bub' + (m.mine ? ' me' : '') + '"><small>' + (m.mine ? 'Tú' : esc(m.alias)) + ' · ' + ago(m.created_at) + '</small>' + esc(m.body) + '</div>';
-    }).join('');
+    var list = msgs.map(msgHTML).join('');
     var acts = '';
     if (o.role === 'received' && o.status === 'pending') acts = '<button class="btn sm" type="button" data-t="accept">Aceptar propuesta</button><button class="btn sm danger" type="button" data-t="decline">Rechazar</button>';
     if (o.role === 'sent' && open) acts = '<button class="btn sm danger" type="button" data-t="withdraw">Retirar mi propuesta</button>';
@@ -750,15 +799,49 @@
       (loadErr ? '<p class="err">' + esc(loadErr) + '</p>' : '') +
       '<div class="thread" id="thread-list" tabindex="0" aria-label="Conversación">' + first + list + '</div>' +
       (acts ? '<div class="row-start">' + acts + '</div>' : '') +
-      (open ? '<form class="f" id="msg-form" novalidate><div class="fld"><label for="t-body">Escribe un mensaje</label><textarea class="in" id="t-body" maxlength="500"></textarea></div><p class="err" id="t-err" role="alert"></p><div class="row-end"><button class="btn ghost" type="button" data-t="refresh">Actualizar</button><button class="btn" type="submit" id="t-send">Enviar</button></div></form>'
+      (open ? '<form class="f" id="msg-form" novalidate><div class="fld"><label for="t-body">Escribe un mensaje</label><textarea class="in" id="t-body" maxlength="500"></textarea></div>' +
+        '<div class="attach" id="t-attach"></div>' +
+        '<div class="row-start tools"><button class="btn sm ghost" type="button" data-t="photo">Añadir foto</button><button class="btn sm ghost" type="button" data-t="place">Punto de encuentro</button>' +
+        '<input type="file" id="t-file" accept="image/jpeg,image/png,image/webp" hidden></div>' +
+        '<div class="panel" id="t-placebox" hidden><p class="hint">Proponed un sitio público y con gente (plaza, cafetería, aparcamiento de un supermercado). No compartas la dirección de tu casa.</p>' +
+        '<div class="fld"><label for="t-place">Escribe el lugar</label><input class="in" id="t-place" maxlength="100" placeholder="Ej.: Plaza de los Fueros, Estella"></div>' +
+        '<div class="row-start"><button class="btn sm" type="button" data-t="place-text">Añadir este lugar</button><button class="btn sm ghost" type="button" data-t="place-gps">Usar mi ubicación actual</button></div>' +
+        '<p class="hint">«Ubicación actual» envía tu posición exacta de este momento (se te pedirá permiso). Úsala solo si ya estás en el punto de encuentro.</p></div>' +
+        '<p class="err" id="t-err" role="alert"></p><div class="row-end"><button class="btn ghost" type="button" data-t="refresh">Actualizar</button><button class="btn" type="submit" id="t-send">Enviar</button></div></form>'
         : '<p class="note">Esta propuesta está cerrada y ya no admite mensajes.</p>');
     var tl = $('#thread-list', body);
     if (tl) tl.scrollTop = tl.scrollHeight;
+    if ($('#t-body')) { $('#t-body').value = draft.text; renderDraftChips(); }
   }
   $('#thread-body').addEventListener('click', async function (e) {
     var b = e.target.closest('[data-t]');
     if (!b || !S.thread) return;
     var a = b.dataset.t, o = S.thread;
+    var terr = $('#t-err');
+    if (a === 'photo') { $('#t-file').click(); return; }
+    if (a === 'place') { var pb = $('#t-placebox'); pb.hidden = !pb.hidden; if (!pb.hidden) $('#t-place').focus(); return; }
+    if (a === 'rm-photo') { if (draft.previewUrl) URL.revokeObjectURL(draft.previewUrl); draft.file = null; draft.previewUrl = ''; renderDraftChips(); return; }
+    if (a === 'rm-place') { draft.place = null; renderDraftChips(); return; }
+    if (a === 'place-text') {
+      var txt = $('#t-place').value.trim();
+      if (txt.length < 3) { terr.textContent = 'Escribe el nombre del lugar (mínimo 3 letras).'; $('#t-place').focus(); return; }
+      terr.textContent = ''; draft.place = { lat: null, lng: null, label: txt }; $('#t-place').value = ''; $('#t-placebox').hidden = true; renderDraftChips(); return;
+    }
+    if (a === 'place-gps') {
+      if (!navigator.geolocation) { terr.textContent = 'Tu navegador no permite compartir la ubicación. Escribe el lugar a mano.'; return; }
+      terr.textContent = ''; setBusy(b, true, 'Buscando…');
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        setBusy(b, false);
+        draft.place = { lat: pos.coords.latitude, lng: pos.coords.longitude, label: $('#t-place').value.trim() };
+        $('#t-place').value = ''; $('#t-placebox').hidden = true; renderDraftChips();
+      }, function (er) {
+        setBusy(b, false);
+        terr.textContent = er && er.code === 1 ? 'No has dado permiso para usar tu ubicación. Puedes escribir el lugar a mano.'
+          : er && er.code === 3 ? 'Tardó demasiado en encontrar tu ubicación. Inténtalo otra vez o escribe el lugar.'
+          : 'No se pudo obtener tu ubicación. Escribe el lugar a mano.';
+      }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+      return;
+    }
     try {
       if (a === 'refresh') { await renderThread(); return; }
       var map = { accept: 'accepted', decline: 'declined', withdraw: 'withdrawn' };
@@ -774,15 +857,29 @@
       renderThread(); if (location.hash === '#propuestas') renderInbox();
     } catch (ex) { toast(api.niceError(ex)); }
   });
+  $('#thread-body').addEventListener('change', function (e) {
+    if (e.target.id !== 't-file') return;
+    var f = e.target.files[0]; e.target.value = '';
+    var err = $('#t-err'); err.textContent = '';
+    if (!f) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { err.textContent = 'Solo se admiten fotos JPG, PNG o WebP.'; return; }
+    if (f.size > 15 * 1024 * 1024) { err.textContent = 'Esa foto pesa demasiado. Elige otra de menos de 15 MB.'; return; }
+    if (draft.previewUrl) URL.revokeObjectURL(draft.previewUrl);
+    draft.file = f; draft.previewUrl = URL.createObjectURL(f); renderDraftChips();
+  });
   $('#thread-body').addEventListener('submit', async function (e) {
     if (e.target.id !== 'msg-form') return;
     e.preventDefault();
     var err = $('#t-err'), ta = $('#t-body');
     err.textContent = '';
     var text = ta.value.trim();
-    if (!text) { err.textContent = 'Escribe algo antes de enviar.'; return; }
+    if (!text && !draft.file && !draft.place) { err.textContent = 'Escribe algo, añade una foto o comparte un punto de encuentro.'; return; }
     var btn = $('#t-send'); setBusy(btn, true, 'Enviando…');
-    try { await api.addMessage(S.thread.id, text); await renderThread(); }
+    try {
+      await api.addMessage(S.thread.id, { body: text, file: draft.file, place: draft.place });
+      resetDraft(S.thread.id);
+      await renderThread();
+    }
     catch (ex) { err.textContent = api.niceError(ex); setBusy(btn, false); }
   });
 
