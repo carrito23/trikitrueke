@@ -333,3 +333,13 @@ dialog.lightbox .x{position:absolute; top:10px; right:10px; z-index:2; backgroun
 .bub.me .place{color:#1F2A2E}
 .bub.me .place small{color:#4A5A5E}
 .place b{display:block}
+
+/* Landings por categoría y zona, y bloque de enlaces de la portada */
+.crumbs{color:var(--muted); font-size:.88rem; margin:0}
+.crumbs a{color:inherit}
+.legal .cta{display:flex; flex-wrap:wrap; gap:10px; margin-block:4px}
+.rel{display:flex; flex-wrap:wrap; gap:8px; padding:0; margin:0; list-style:none}
+.legal ul.rel{display:flex; padding-left:0}
+.rel a{display:inline-block; border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:999px; padding:7px 14px; text-decoration:none; font-size:.94rem}
+.rel a:hover{border-color:var(--brand)}
+.explore p{color:var(--muted); margin:0}

@@ -1,6 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://trikitrueke.es/</loc><lastmod>2026-11-01</lastmod><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>https://trikitrueke.es/trueque.html</loc><lastmod>2026-11-01</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-vehiculos.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-libros.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-discos.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-ropa.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-casas.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-deporte.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-tecnologia.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-hogar.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-herramientas.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-navarra.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-la-rioja.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-aragon.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-soria.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-madrid.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://trikitrueke.es/trueque-cataluna.html</loc><lastmod>2026-11-01</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://trikitrueke.es/normas.html</loc><lastmod>2026-10-31</lastmod><changefreq>yearly</changefreq><priority>0.4</priority></url>
   <url><loc>https://trikitrueke.es/aviso-legal.html</loc><lastmod>2026-10-31</lastmod><changefreq>yearly</changefreq><priority>0.2</priority></url>
   <url><loc>https://trikitrueke.es/privacidad.html</loc><lastmod>2026-10-31</lastmod><changefreq>yearly</changefreq><priority>0.2</priority></url>
