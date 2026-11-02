@@ -228,10 +228,9 @@ create or replace function public.trg_listings_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if auth.uid() is not null and not public.is_admin() then
-    if (select count(*) from public.listings where user_id = new.user_id and created_at > now() - interval '1 day') >= 10 then
-      raise exception 'rate_limit_listings';
-    end if;
-    if (select count(*) from public.listings where user_id = new.user_id and status in ('active','hidden')) >= 40 then
+    -- Sin límite diario de anuncios. Solo queda el máximo de anuncios vivos por persona
+    -- (activos + ocultos). Para cambiarlo, modifica el 100.
+    if (select count(*) from public.listings where user_id = new.user_id and status in ('active','hidden')) >= 100 then
       raise exception 'listing_cap';
     end if;
     new.status := 'active';

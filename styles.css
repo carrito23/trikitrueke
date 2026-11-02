@@ -343,3 +343,9 @@ dialog.lightbox .x{position:absolute; top:10px; right:10px; z-index:2; backgroun
 .rel a{display:inline-block; border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:999px; padding:7px 14px; text-decoration:none; font-size:.94rem}
 .rel a:hover{border-color:var(--brand)}
 .explore p{color:var(--muted); margin:0}
+
+/* Alias que enlaza con el perfil público */
+a.alias{color:inherit; font-weight:700; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px; cursor:pointer}
+a.alias:hover{color:var(--brand-text); text-decoration-style:solid}
+#profile-head h1{font-size:clamp(1.8rem,4.5vw,2.6rem); font-weight:800; letter-spacing:-.02em; overflow-wrap:anywhere}
+#profile-head .sub{margin:4px 0 0}

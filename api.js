@@ -42,7 +42,7 @@
       [/email not confirmed/i, 'Todavía no has confirmado tu correo. Revisa tu bandeja de entrada y la carpeta de spam.'],
       [/rate limit|too many requests|over_email_send_rate_limit|email rate limit/i, 'Demasiados intentos seguidos. Espera unos minutos y vuelve a probar.'],
       [/rate_limit_listings/, 'Has llegado al límite de 10 anuncios al día. Prueba mañana.'],
-      [/listing_cap/, 'Has llegado al máximo de 40 anuncios. Borra o marca como cambiado alguno.'],
+      [/listing_cap/, 'Has llegado al máximo de 100 anuncios. Borra o marca como cambiado alguno.'],
       [/rate_limit_offers/, 'Has llegado al límite de 20 propuestas al día.'],
       [/rate_limit_messages/, 'Has llegado al límite de mensajes de hoy.'],
       [/rate_limit_attachments/, 'Has llegado al límite de 30 fotos de chat al día.'],
@@ -306,6 +306,19 @@
       if (r.error) throw r.error;
       return (r.data || []).map(norm);
     };
+    /* ---- perfiles públicos ---- */
+    api.getProfile = async function (alias) {
+      if (!/^[A-Za-z0-9_.-]{3,30}$/.test(alias)) return null;
+      var r = await sb.from('profiles').select('id,alias,created_at').eq('alias', alias).maybeSingle();
+      if (r.error) throw r.error;
+      return r.data || null;
+    };
+    api.listByUser = async function (userId, from, to) {
+      var r = await sb.from('listings').select(LISTING_COLS, { count: 'exact' })
+        .eq('status', 'active').eq('user_id', userId).order('created_at', { ascending: false }).range(from, to);
+      if (r.error) throw r.error;
+      return { rows: (r.data || []).map(norm), count: r.count || 0 };
+    };
 
     async function uploadPhoto(file) {
       var blob = await compressImage(file);
@@ -545,7 +558,7 @@
     var reports = [];
     var hoursAgo = function (h) { return new Date(Date.now() - h * 3600e3).toISOString(); };
 
-    function mkUser(alias) { var id = uuid(); users[alias + '@demo.es'] = { id: id, email: alias + '@demo.es', alias: alias, password: 'demodemo' }; return id; }
+    function mkUser(alias) { var id = uuid(); users[alias + '@demo.es'] = { id: id, email: alias + '@demo.es', alias: alias, password: 'demodemo', created_at: hoursAgo(24 * 40) }; return id; }
     var ids = { ana: mkUser('ana_ribera'), pablo: mkUser('pablo.rj'), marta: mkUser('marta_zgz'), luis: mkUser('luis88') };
     function L(u, h, title, cat, want, open, zone, town, desc) {
       listings.push({ id: uuid(), user_id: ids[u], title: title, description: desc || '', category_id: cat, want: want, open: open,
@@ -575,7 +588,7 @@
     api.signUp = function (o) {
       if (!/^[A-Za-z0-9_.-]{3,30}$/.test(o.alias)) return fail('Ese alias no está disponible. Elige otro: de 3 a 30 letras, números, punto, guion o guion bajo, sin espacios.');
       for (var k in users) if (users[k].alias.toLowerCase() === o.alias.toLowerCase()) return fail('Ese alias no está disponible. Elige otro: de 3 a 30 letras, números, punto, guion o guion bajo, sin espacios.');
-      users[o.email] = { id: uuid(), email: o.email, alias: o.alias, password: o.password };
+      users[o.email] = { id: uuid(), email: o.email, alias: o.alias, password: o.password, created_at: new Date().toISOString() };
       api.user = { id: users[o.email].id, email: o.email, alias: o.alias, isAdmin: /admin/i.test(o.email) };
       emit('auth');
       return delay({ needsConfirmation: false });
@@ -634,10 +647,17 @@
     api.myListings = function () {
       return delay(listings.filter(function (l) { return l.user_id === api.user.id; }).sort(function (a, b) { return a.created_at < b.created_at ? 1 : -1; }).map(view));
     };
+    api.getProfile = function (alias) {
+      for (var k in users) if (users[k].alias === alias) return delay({ id: users[k].id, alias: users[k].alias, created_at: users[k].created_at || new Date().toISOString() });
+      return delay(null);
+    };
+    api.listByUser = function (userId, from, to) {
+      var rows = listings.filter(function (l) { return l.user_id === userId && l.status === 'active'; })
+        .sort(function (a, b) { return a.created_at < b.created_at ? 1 : -1; });
+      return delay({ rows: rows.slice(from, to + 1).map(view), count: rows.length });
+    };
     function photoFrom(file) { return file ? URL.createObjectURL(file) : ''; }
     api.createListing = function (d) {
-      var mine = listings.filter(function (l) { return l.user_id === api.user.id && Date.now() - Date.parse(l.created_at) < 864e5; }).length;
-      if (mine >= 10) return fail('rate_limit_listings');
       var l = { id: uuid(), user_id: api.user.id, title: d.title, description: d.description, category_id: d.category_id, want: d.want, open: d.open,
         zone: d.zone, town: d.town, photo_path: d.file ? 'demo' : null, photoUrl: photoFrom(d.file), status: 'active', moderation_note: '', created_at: new Date().toISOString() };
       listings.push(l); return delay(l.id);

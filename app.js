@@ -75,6 +75,12 @@
     return { id: id, name: id, icon: 'tag', hue: 200 };
   }
   function where(l) { return [l.town, l.zone].filter(Boolean).join(', '); }
+  // Alias que lleva al perfil público. Si el alias no tiene un formato válido, se muestra como texto.
+  var ALIAS_RE = /^[A-Za-z0-9_.-]{3,30}$/;
+  function aliasLink(alias) {
+    if (!ALIAS_RE.test(alias || '')) return esc(alias);
+    return '<a class="alias" href="#perfil/' + esc(alias) + '" data-profile="1" title="Ver el perfil de ' + esc(alias) + '">' + esc(alias) + '</a>';
+  }
 
   /* ------------------------------------------------------------------ */
   /* Avisos, diálogos                                                    */
@@ -96,6 +102,10 @@
     var menu = $('#user-menu');
     if (menu && menu.open && !e.target.closest('#user-menu')) menu.open = false;
     if (menu && menu.open && e.target.closest('.menu-list a, .menu-list button')) menu.open = false;
+  });
+  // Al pulsar un alias dentro de una ventana (anuncio, conversación), se cierra para ver el perfil.
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('a[data-profile]')) $$('dialog[open]').forEach(function (d) { closeD(d); });
   });
 
   function askConfirm(o) {
@@ -405,6 +415,7 @@
   async function reloadAll() {
     try { await loadMeta(); } catch (e) { /* se mantiene lo que había */ }
     await loadListings(true);
+    if (/^#perfil\//.test(location.hash) && PF.alias) loadProfile(PF.alias);
   }
 
   /* eventos de portada */
@@ -604,7 +615,7 @@
       '<div class="pair"><div class="side give"><span class="lbl">Doy</span><p><b>' + esc(l.title) + '</b></p></div>' +
       '<div class="side want"><span class="lbl">Busco</span><p>' + (l.want ? esc(l.want) : 'Lo que me propongas') + (l.open ? '<span class="pill">Escucho ofertas</span>' : '') + '</p></div></div>' +
       (l.description ? '<p style="white-space:pre-wrap;overflow-wrap:anywhere">' + esc(l.description) + '</p>' : '') +
-      '<p class="sub" style="color:var(--muted);font-size:.9rem">' + esc(c.name) + (where(l) ? ' · ' + esc(where(l)) : '') + ' · ' + ago(l.created_at) + (l.alias ? ' · por <b>' + esc(l.alias) + '</b>' : '') + '</p>' +
+      '<p class="sub" style="color:var(--muted);font-size:.9rem">' + esc(c.name) + (where(l) ? ' · ' + esc(where(l)) : '') + ' · ' + ago(l.created_at) + (l.alias ? ' · por <b>' + aliasLink(l.alias) + '</b>' : '') + '</p>' +
       note + actions + report +
       '<div class="copyrow"><button class="linkbtn" type="button" data-d="copy">Copiar enlace al anuncio</button></div>';
 
@@ -720,7 +731,7 @@
     }
     box.innerHTML = rows.map(function (o) {
       var st = OST[o.status] || OST.pending;
-      var who = o.role === 'received' ? esc(o.other_alias) + ' te ofrece: <b>' + esc(o.offer_text) + '</b>' : 'Tú ofreces: <b>' + esc(o.offer_text) + '</b> a ' + esc(o.other_alias);
+      var who = o.role === 'received' ? aliasLink(o.other_alias) + ' te ofrece: <b>' + esc(o.offer_text) + '</b>' : 'Tú ofreces: <b>' + esc(o.offer_text) + '</b> a ' + aliasLink(o.other_alias);
       return '<article class="row plain"><div><h3>' + esc(o.listing_title) + '</h3><p class="sub"><span class="st ' + st[1] + '">' + st[0] + '</span>' + who + ' · ' + ago(o.created_at) + '</p></div>' +
         '<div class="acts"><button class="btn sm" type="button" data-offer="' + esc(o.id) + '">Abrir</button></div></article>';
     }).join('');
@@ -762,7 +773,7 @@
         ? '<button class="chatimg" type="button" data-zoom="' + esc(m.photoUrl) + '" data-alt="Foto enviada por ' + esc(m.mine ? 'ti' : m.alias) + '"><img src="' + esc(m.photoUrl) + '" alt="Foto enviada" loading="lazy"></button>'
         : '<p class="muted">Foto no disponible.</p>';
     }
-    return '<div class="bub' + (m.mine ? ' me' : '') + '"><small>' + (m.mine ? 'Tú' : esc(m.alias)) + ' · ' + ago(m.created_at) + '</small>' +
+    return '<div class="bub' + (m.mine ? ' me' : '') + '"><small>' + (m.mine ? 'Tú' : aliasLink(m.alias)) + ' · ' + ago(m.created_at) + '</small>' +
       (m.body ? '<div>' + esc(m.body) + '</div>' : '') + photo + (m.place ? placeHTML(m.place) : '') + '</div>';
   }
   // Borrador del mensaje que se está escribiendo (se conserva al pulsar «Actualizar»)
@@ -787,7 +798,7 @@
     try { msgs = await api.getThread(o.id); } catch (e) { loadErr = api.niceError(e); }
     var st = OST[o.status] || OST.pending;
     var open = o.status === 'pending' || o.status === 'accepted';
-    var first = '<div class="bub' + (o.role === 'sent' ? ' me' : '') + '"><small>' + (o.role === 'sent' ? 'Tú' : esc(o.other_alias)) + ' · propuesta · ' + ago(o.created_at) + '</small>Ofrece: <b>' + esc(o.offer_text) + '</b>' + (o.message ? '<br>' + esc(o.message) : '') + '</div>';
+    var first = '<div class="bub' + (o.role === 'sent' ? ' me' : '') + '"><small>' + (o.role === 'sent' ? 'Tú' : aliasLink(o.other_alias)) + ' · propuesta · ' + ago(o.created_at) + '</small>Ofrece: <b>' + esc(o.offer_text) + '</b>' + (o.message ? '<br>' + esc(o.message) : '') + '</div>';
     var list = msgs.map(msgHTML).join('');
     var acts = '';
     if (o.role === 'received' && o.status === 'pending') acts = '<button class="btn sm" type="button" data-t="accept">Aceptar propuesta</button><button class="btn sm danger" type="button" data-t="decline">Rechazar</button>';
@@ -795,7 +806,7 @@
     var hint = o.status === 'accepted' ? '<p class="note">Propuesta aceptada. Acordad lugar y hora aquí. Quedad en un sitio público, comprobad el artículo antes de cambiar y no compartáis datos bancarios. Cuando cerréis el trueque, marca el anuncio como «cambiado» desde «Mis anuncios».</p>' : '';
     body.innerHTML =
       '<div class="dlg-head"><h2 id="t-title">' + esc(o.listing_title) + '</h2><button class="x" type="button" data-close aria-label="Cerrar">' + CLOSE_SVG + '</button></div>' +
-      '<p class="sub" style="color:var(--muted)"><span class="st ' + st[1] + '">' + st[0] + '</span>Con <b>' + esc(o.other_alias) + '</b></p>' + hint +
+      '<p class="sub" style="color:var(--muted)"><span class="st ' + st[1] + '">' + st[0] + '</span>Con <b>' + aliasLink(o.other_alias) + '</b></p>' + hint +
       (loadErr ? '<p class="err">' + esc(loadErr) + '</p>' : '') +
       '<div class="thread" id="thread-list" tabindex="0" aria-label="Conversación">' + first + list + '</div>' +
       (acts ? '<div class="row-start">' + acts + '</div>' : '') +
@@ -976,6 +987,75 @@
   });
 
   /* ------------------------------------------------------------------ */
+  /* Perfil público (#perfil/alias)                                      */
+  /* ------------------------------------------------------------------ */
+  var PF = { alias: '', user: null, rows: [], total: 0, page: 0, loading: false, error: '', req: 0 };
+
+  function monthYear(iso) {
+    var d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  }
+  function renderProfile() {
+    var head = $('#profile-head'), g = $('#profile-grid'), cnt = $('#profile-count'), more = $('#profile-more');
+    more.hidden = true;
+    if (PF.error) {
+      head.innerHTML = '<h1>Perfil</h1>'; cnt.textContent = '';
+      g.innerHTML = '<div class="empty"><h3>No hemos podido cargar el perfil</h3><p>' + esc(PF.error) + '</p><button class="btn" type="button" data-act="retry-profile">Reintentar</button></div>';
+      return;
+    }
+    if (!PF.user) {
+      cnt.textContent = '';
+      if (PF.loading) { head.innerHTML = '<h1>' + esc(PF.alias) + '</h1>'; g.innerHTML = '<div class="skel"></div>'; return; }
+      head.innerHTML = '<h1>Perfil no encontrado</h1>';
+      g.innerHTML = '<div class="empty"><h3>No hay nadie con ese alias</h3><p>Puede que el enlace esté mal escrito o que la cuenta se haya borrado.</p><a class="btn" href="#inicio">Ver los trueques</a></div>';
+      return;
+    }
+    var mine = !!(api.user && api.user.id === PF.user.id);
+    var since = monthYear(PF.user.created_at);
+    head.innerHTML = '<h1>' + esc(PF.user.alias) + '</h1><p class="sub" style="color:var(--muted)">' +
+      (since ? 'En Trikitrueke desde ' + esc(since) + '. ' : '') +
+      (mine ? 'Así te ven los demás. <a href="#mis-anuncios">Gestionar mis anuncios</a>' : '') + '</p>';
+    if (PF.loading && !PF.rows.length) { cnt.textContent = 'Cargando…'; g.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div>'; return; }
+    cnt.textContent = PF.total + ' ' + (PF.total === 1 ? 'trueque activo' : 'trueques activos');
+    if (!PF.rows.length) {
+      g.innerHTML = '<div class="empty"><h3>Ahora mismo no tiene trueques activos</h3><p>Vuelve a mirar más tarde o échale un vistazo a lo que hay en la portada.</p><a class="btn" href="#inicio">Ver los trueques</a></div>';
+      return;
+    }
+    g.innerHTML = PF.rows.map(cardHTML).join('');
+    more.hidden = PF.rows.length >= PF.total;
+  }
+  async function loadProfile(alias, more) {
+    var my = ++PF.req;
+    if (!more) { PF.alias = alias; PF.user = null; PF.rows = []; PF.total = 0; PF.page = 0; }
+    PF.loading = true; PF.error = '';
+    renderProfile();
+    try {
+      if (!more) {
+        var u = await api.getProfile(alias);
+        if (my !== PF.req) return;
+        PF.user = u;
+        if (!u) { PF.loading = false; renderProfile(); return; }
+        renderProfile();
+      }
+      var P = api.PAGE_SIZE;
+      var r = await api.listByUser(PF.user.id, PF.page * P, PF.page * P + P - 1);
+      if (my !== PF.req) return;
+      PF.rows = PF.rows.concat(r.rows); PF.total = r.count; PF.page++;
+    } catch (e) {
+      if (my !== PF.req) return;
+      PF.error = api.niceError(e);
+    }
+    PF.loading = false;
+    renderProfile();
+  }
+  $('#profile-grid').addEventListener('click', function (e) {
+    var o = e.target.closest('[data-open]');
+    if (o) { openDetail(o.dataset.open); return; }
+    if (e.target.closest('[data-act="retry-profile"]')) loadProfile(PF.alias);
+  });
+  $('#btn-profile-more').addEventListener('click', function () { loadProfile(PF.alias, true); });
+
+  /* ------------------------------------------------------------------ */
   /* Navegación                                                          */
   /* ------------------------------------------------------------------ */
   function showView(name) {
@@ -992,7 +1072,9 @@
     else if (h === '#propuestas') name = 'inbox';
     else if (h === '#cuenta') name = 'account';
     else if (h === '#moderacion') name = 'admin';
-    if (name !== 'home' && !api.user) {
+    var pm = /^#perfil\/([A-Za-z0-9_.-]{3,30})$/.exec(h);
+    if (pm) name = 'profile';
+    if (name !== 'home' && name !== 'profile' && !api.user) {
       history.replaceState(null, '', '#inicio');
       showView('home');
       openAuth('login', 'Entra para ver esta página.');
@@ -1000,6 +1082,7 @@
     }
     if (name === 'admin' && !(api.user && api.user.isAdmin)) name = 'home';
     showView(name);
+    if (name === 'profile') { loadProfile(pm[1]); window.scrollTo(0, 0); return; }
     var m = /^#a-([0-9a-zA-Z-]{8,64})$/.exec(h);
     if (m) { history.replaceState(null, '', '#inicio'); openDetail(m[1]); return; }
     if (h === '#como') { var el = $('#como'); if (el && el.scrollIntoView) el.scrollIntoView(); }
@@ -1012,6 +1095,7 @@
     S.offerTab = 'received';
     renderHeader();
     refreshOffers();
+    if (/^#perfil\//.test(location.hash) && PF.alias) renderProfile();
     if (!api.user && /^#(mis-anuncios|propuestas|cuenta|moderacion)$/.test(location.hash)) go('#inicio');
   });
 
