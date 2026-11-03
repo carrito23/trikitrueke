@@ -349,3 +349,8 @@ a.alias{color:inherit; font-weight:700; text-decoration:underline; text-decorati
 a.alias:hover{color:var(--brand-text); text-decoration-style:solid}
 #profile-head h1{font-size:clamp(1.8rem,4.5vw,2.6rem); font-weight:800; letter-spacing:-.02em; overflow-wrap:anywhere}
 #profile-head .sub{margin:4px 0 0}
+
+/* Novedades en propuestas */
+.st.new{background:var(--brand); color:var(--brand-ink)}
+.row.unread{border-left:4px solid var(--brand)}
+.note.news{background:var(--soft); border:1px solid var(--brand); border-radius:10px; padding:.6rem .8rem}

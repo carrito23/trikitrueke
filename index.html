@@ -175,8 +175,8 @@
     <section id="view-inbox" class="view" data-view="inbox" hidden>
       <h1>Propuestas</h1>
       <div class="tabs" role="tablist" aria-label="Tipo de propuestas">
-        <button type="button" role="tab" id="tab-received" data-tab="received" aria-selected="true">Recibidas <span class="badge js-badge" hidden></span></button>
-        <button type="button" role="tab" id="tab-sent" data-tab="sent" aria-selected="false">Enviadas</button>
+        <button type="button" role="tab" id="tab-received" data-tab="received" aria-selected="true">Recibidas <span class="badge" id="badge-received" hidden></span></button>
+        <button type="button" role="tab" id="tab-sent" data-tab="sent" aria-selected="false">Enviadas <span class="badge" id="badge-sent" hidden></span></button>
       </div>
       <div class="rows" id="inbox-rows" aria-live="polite"></div>
     </section>
@@ -198,6 +198,11 @@
           <button class="btn ghost" type="button" data-acc="password">Cambiar contraseña</button>
           <button class="btn ghost" type="button" data-acc="logout">Cerrar sesión</button>
         </div>
+      </div>
+      <div class="panel">
+        <h2>Avisos por correo</h2>
+        <label class="chk"><input type="checkbox" id="acc-notify" checked disabled> Avisarme por correo cuando reciba una propuesta, una respuesta o un mensaje</label>
+        <p class="hint">El correo no incluye lo que te ofrecen ni el mensaje: solo te avisa de que hay novedades y te lleva a la web. Puedes desactivarlo cuando quieras.</p>
       </div>
       <div class="panel">
         <h2>Borrar mi cuenta</h2>

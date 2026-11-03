@@ -551,3 +551,306 @@ on conflict do nothing;
 --
 --    insert into public.admins (user_id) select id from auth.users where email = 'TU-CORREO@ejemplo.com';
 -- ---------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------
+-- 10. AVISOS: NOVEDADES EN LA WEB Y CORREO
+--     Las propuestas y mensajes nuevos se marcan como "no leídos" hasta que
+--     la persona abre la conversación. Además, se puede enviar un correo
+--     (ver LEEME.md → «Avisos por correo»). Sin la clave de correo, el resto
+--     funciona igual: simplemente no se envía ningún correo.
+-- ---------------------------------------------------------------------
+
+-- 10.1 Cuándo cambió el estado de una propuesta (aceptada, rechazada, retirada).
+alter table public.offers add column if not exists updated_at timestamptz not null default now();
+
+create or replace function public.trg_offers_touch() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if new.status is distinct from old.status then
+    new.updated_at := now();
+  end if;
+  return new;
+end $$;
+drop trigger if exists offers_touch on public.offers;
+create trigger offers_touch before update on public.offers
+  for each row execute function public.trg_offers_touch();
+
+-- 10.2 Cuándo abrió cada persona cada conversación.
+--      Solo se crea la primera vez; lo que ya existía cuenta como leído.
+do $$
+begin
+  if to_regclass('public.offer_reads') is null then
+    create table public.offer_reads (
+      user_id       uuid not null references public.profiles(id) on delete cascade,
+      offer_id      uuid not null references public.offers(id) on delete cascade,
+      last_read_at  timestamptz not null default now(),
+      primary key (user_id, offer_id)
+    );
+    insert into public.offer_reads (user_id, offer_id, last_read_at)
+      select o.from_user, o.id, clock_timestamp() from public.offers o
+      union all
+      select l.user_id, o.id, clock_timestamp() from public.offers o join public.listings l on l.id = o.listing_id;
+  end if;
+end $$;
+create index if not exists offer_reads_offer_idx on public.offer_reads (offer_id);
+
+-- La hora la pone siempre el servidor, nunca el navegador.
+create or replace function public.trg_offer_reads_touch() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  new.last_read_at := clock_timestamp();
+  return new;
+end $$;
+drop trigger if exists offer_reads_touch on public.offer_reads;
+create trigger offer_reads_touch before insert or update on public.offer_reads
+  for each row execute function public.trg_offer_reads_touch();
+
+alter table public.offer_reads enable row level security;
+drop policy if exists offer_reads_select on public.offer_reads;
+create policy offer_reads_select on public.offer_reads for select to authenticated
+  using (user_id = auth.uid());
+drop policy if exists offer_reads_insert on public.offer_reads;
+create policy offer_reads_insert on public.offer_reads for insert to authenticated
+  with check (user_id = auth.uid() and public.is_offer_party(offer_id));
+drop policy if exists offer_reads_update on public.offer_reads;
+create policy offer_reads_update on public.offer_reads for update to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid() and public.is_offer_party(offer_id));
+revoke all on public.offer_reads from anon;
+grant select, insert, update on public.offer_reads to authenticated;
+
+-- 10.3 ¿Qué conversaciones tienen novedades para mí? Cuenta lo que hace la OTRA persona:
+--      una propuesta recibida, su respuesta (aceptar, rechazar, retirar) o un mensaje suyo.
+create or replace view public.my_offer_unread with (security_invoker = true) as
+select o.id as offer_id,
+       coalesce(greatest(
+         case when o.from_user <> auth.uid() then o.created_at end,
+         case when o.from_user = auth.uid() and o.status in ('accepted','declined') then o.updated_at end,
+         case when o.from_user <> auth.uid() and o.status = 'withdrawn' then o.updated_at end,
+         (select max(m.created_at) from public.offer_messages m where m.offer_id = o.id and m.sender_id <> auth.uid())
+       ), '-infinity'::timestamptz) > coalesce(r.last_read_at, '-infinity'::timestamptz) as unread
+from public.offers o
+left join public.offer_reads r on r.offer_id = o.id and r.user_id = auth.uid();
+revoke all on public.my_offer_unread from anon;
+grant select on public.my_offer_unread to authenticated;
+
+-- 10.4 Preferencia de avisos por correo (privada: cada persona ve solo la suya).
+--      Sin fila = avisos activados.
+create table if not exists public.notification_prefs (
+  user_id   uuid primary key references public.profiles(id) on delete cascade,
+  email_on  boolean not null default true
+);
+alter table public.notification_prefs enable row level security;
+drop policy if exists notif_prefs_select on public.notification_prefs;
+create policy notif_prefs_select on public.notification_prefs for select to authenticated
+  using (user_id = auth.uid());
+drop policy if exists notif_prefs_insert on public.notification_prefs;
+create policy notif_prefs_insert on public.notification_prefs for insert to authenticated
+  with check (user_id = auth.uid());
+drop policy if exists notif_prefs_update on public.notification_prefs;
+create policy notif_prefs_update on public.notification_prefs for update to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+revoke all on public.notification_prefs from anon;
+grant select, insert, update on public.notification_prefs to authenticated;
+
+-- 10.5 Registro de correos enviados (para no enviar de más) y claves privadas.
+--      Nadie accede a estas dos tablas desde la web: solo las funciones de abajo.
+create table if not exists public.email_log (
+  id          bigint generated always as identity primary key,
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  offer_id    uuid references public.offers(id) on delete cascade,
+  kind        text not null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists email_log_user_idx  on public.email_log (user_id, created_at desc);
+create index if not exists email_log_offer_idx on public.email_log (offer_id, user_id, kind, created_at desc);
+alter table public.email_log enable row level security;
+revoke all on public.email_log from anon, authenticated;
+
+create table if not exists public.app_secrets (
+  name   text primary key,
+  value  text not null
+);
+alter table public.app_secrets enable row level security;
+revoke all on public.app_secrets from anon, authenticated;
+
+-- 10.6 Envío de correo. Usa la API de Brevo (empresa europea) a través de pg_net.
+--      Si no hay clave, no hay extensión o algo falla, NO se envía nada y NO se
+--      interrumpe la propuesta ni el mensaje: el correo nunca puede romper la web.
+do $$
+begin
+  create extension if not exists pg_net;
+exception when others then
+  raise notice 'No se pudo activar pg_net. Actívala en Database → Extensions para enviar correos.';
+end $$;
+
+create or replace function public.html_escape(t text) returns text
+language sql immutable as $$
+  select replace(replace(replace(replace(replace(coalesce(t, ''), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '"', '&quot;'), '''', '&#39;');
+$$;
+
+create or replace function public.send_notification_email(p_user uuid, p_offer uuid, p_kind text, p_title text)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  site     constant text := 'https://trikitrueke.es';
+  api_key  text;
+  to_email text;
+  subj     text;
+  headline text;
+  line_txt text;
+  line_htm text;
+  link     text;
+  ttl_txt  text := left(coalesce(p_title, ''), 80);
+  ttl_htm  text := public.html_escape(left(coalesce(p_title, ''), 80));
+  htm      text;
+  txt      text;
+begin
+  begin
+    select value into api_key from public.app_secrets where name = 'brevo_api_key';
+    if api_key is null or btrim(api_key) = '' then return; end if;
+
+    -- Quien se ha dado de baja de los avisos no recibe nada.
+    if exists (select 1 from public.notification_prefs where user_id = p_user and not email_on) then return; end if;
+
+    -- Tope por persona: 30 correos al día.
+    if (select count(*) from public.email_log where user_id = p_user and created_at > now() - interval '1 day') >= 30 then return; end if;
+
+    -- Mensajes: como mucho un correo cada 30 minutos por conversación.
+    if p_kind = 'message' and exists (
+         select 1 from public.email_log
+         where user_id = p_user and offer_id = p_offer and kind = 'message' and created_at > now() - interval '30 minutes') then
+      return;
+    end if;
+
+    select email into to_email from auth.users where id = p_user;
+    if to_email is null or btrim(to_email) = '' then return; end if;
+
+    link := site || '/#propuestas';
+    if p_kind = 'proposal' then
+      subj     := 'Tienes una propuesta nueva en Trikitrueke';
+      headline := 'Tienes una propuesta nueva';
+      line_txt := 'Alguien te ha propuesto un cambio por tu anuncio «' || ttl_txt || '».';
+      line_htm := 'Alguien te ha propuesto un cambio por tu anuncio «' || ttl_htm || '».';
+    elsif p_kind = 'accepted' then
+      subj     := 'Han aceptado tu propuesta en Trikitrueke';
+      headline := 'Han aceptado tu propuesta';
+      line_txt := 'Tu propuesta por «' || ttl_txt || '» ha sido aceptada. Acordad lugar y fecha en la conversación.';
+      line_htm := 'Tu propuesta por «' || ttl_htm || '» ha sido aceptada. Acordad lugar y fecha en la conversación.';
+    elsif p_kind = 'declined' then
+      subj     := 'Respuesta a tu propuesta en Trikitrueke';
+      headline := 'Tu propuesta no ha sido aceptada';
+      line_txt := 'Tu propuesta por «' || ttl_txt || '» no ha sido aceptada esta vez. Hay más trueques esperándote.';
+      line_htm := 'Tu propuesta por «' || ttl_htm || '» no ha sido aceptada esta vez. Hay más trueques esperándote.';
+    elsif p_kind = 'message' then
+      subj     := 'Tienes un mensaje nuevo en Trikitrueke';
+      headline := 'Tienes un mensaje nuevo';
+      line_txt := 'Te han escrito en la conversación sobre «' || ttl_txt || '».';
+      line_htm := 'Te han escrito en la conversación sobre «' || ttl_htm || '».';
+    else
+      return;
+    end if;
+
+    txt := headline || E'\n\n' || line_txt || E'\n\nEntra para verlo: ' || link ||
+           E'\n\nRecibes este aviso porque tienes una cuenta en Trikitrueke. Puedes desactivarlo en «Mi cuenta»: ' || site || '/#cuenta';
+    htm := '<div style="font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5;color:#1F2A2E;max-width:520px;margin:0 auto;padding:16px">'
+        || '<h2 style="margin:0 0 12px;font-size:20px">' || headline || '</h2>'
+        || '<p style="margin:0 0 16px">' || line_htm || '</p>'
+        || '<p style="margin:0 0 20px"><a href="' || link || '" style="display:inline-block;background:#F7931E;color:#1A1F26;text-decoration:none;font-weight:bold;padding:12px 18px;border-radius:8px">Abrir Trikitrueke</a></p>'
+        || '<p style="margin:0;color:#6B7280;font-size:13px">Recibes este aviso porque tienes una cuenta en Trikitrueke. '
+        || 'Puedes desactivarlo en <a href="' || site || '/#cuenta" style="color:#6B7280">Mi cuenta</a>.</p>'
+        || '</div>';
+
+    perform net.http_post(
+      'https://api.brevo.com/v3/smtp/email',
+      jsonb_build_object(
+        'sender',      jsonb_build_object('name', 'Trikitrueke', 'email', 'info@trikitrueke.es'),
+        'to',          jsonb_build_array(jsonb_build_object('email', to_email)),
+        'subject',     subj,
+        'htmlContent', htm,
+        'textContent', txt
+      ),
+      '{}'::jsonb,
+      jsonb_build_object('api-key', api_key, 'content-type', 'application/json', 'accept', 'application/json')
+    );
+
+    insert into public.email_log (user_id, offer_id, kind) values (p_user, p_offer, p_kind);
+  exception when others then
+    return;
+  end;
+end $$;
+revoke all on function public.send_notification_email(uuid, uuid, text, text) from public, anon, authenticated;
+
+-- 10.7 Cuándo se envía cada correo.
+create or replace function public.trg_notify_offer_insert() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  owner uuid;
+  ttl   text;
+begin
+  begin
+    select user_id, title into owner, ttl from public.listings where id = new.listing_id;
+    if owner is not null then
+      perform public.send_notification_email(owner, new.id, 'proposal', ttl);
+    end if;
+  exception when others then
+    null;
+  end;
+  return new;
+end $$;
+revoke all on function public.trg_notify_offer_insert() from public, anon, authenticated;
+drop trigger if exists offers_notify_insert on public.offers;
+create trigger offers_notify_insert after insert on public.offers
+  for each row execute function public.trg_notify_offer_insert();
+
+create or replace function public.trg_notify_offer_update() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  ttl text;
+begin
+  begin
+    select title into ttl from public.listings where id = new.listing_id;
+    perform public.send_notification_email(new.from_user, new.id, new.status, ttl);
+  exception when others then
+    null;
+  end;
+  return new;
+end $$;
+revoke all on function public.trg_notify_offer_update() from public, anon, authenticated;
+drop trigger if exists offers_notify_update on public.offers;
+create trigger offers_notify_update after update of status on public.offers
+  for each row
+  when (old.status is distinct from new.status and new.status in ('accepted', 'declined'))
+  execute function public.trg_notify_offer_update();
+
+create or replace function public.trg_notify_message_insert() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  o record;
+  rcpt uuid;
+begin
+  begin
+    select ofr.from_user, l.user_id, l.title into o
+    from public.offers ofr join public.listings l on l.id = ofr.listing_id
+    where ofr.id = new.offer_id;
+    if found then
+      rcpt := case when new.sender_id = o.from_user then o.user_id else o.from_user end;
+      perform public.send_notification_email(rcpt, new.offer_id, 'message', o.title);
+    end if;
+  exception when others then
+    null;
+  end;
+  return new;
+end $$;
+revoke all on function public.trg_notify_message_insert() from public, anon, authenticated;
+drop trigger if exists messages_notify_insert on public.offer_messages;
+create trigger messages_notify_insert after insert on public.offer_messages
+  for each row execute function public.trg_notify_message_insert();
+
+-- 10.8 Para activar el correo (UNA vez, a mano, con TU clave; no la subas a GitHub):
+--
+--    insert into public.app_secrets (name, value) values ('brevo_api_key', 'PEGA-AQUI-TU-CLAVE')
+--    on conflict (name) do update set value = excluded.value;
+--
+-- Para desactivarlo: delete from public.app_secrets where name = 'brevo_api_key';
+-- ---------------------------------------------------------------------

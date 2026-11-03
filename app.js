@@ -63,6 +63,7 @@
   /* Estado                                                              */
   /* ------------------------------------------------------------------ */
   var S = {
+    unread: {},
     cats: [], zones: [], counts: {},
     q: '', cat: '', zone: '', kind: 'all', sort: 'new',
     page: 0, total: 0, rows: [], loading: false, error: '', req: 0,
@@ -155,17 +156,57 @@
     }
     renderBadge();
   }
-  function renderBadge() {
-    $$('.js-badge').forEach(function (b) { b.textContent = S.pending; b.hidden = !S.pending; });
+  var BASE_TITLE = document.title;
+  function unreadCount(role) {
+    return S.offers.filter(function (o) { return S.unread[o.id] && (!role || o.role === role); }).length;
   }
-  async function refreshOffers() {
-    if (!api.user) { S.offers = []; S.pending = 0; renderBadge(); return; }
+  function renderBadge() {
+    var n = unreadCount();
+    $$('.js-badge').forEach(function (b) { b.textContent = n; b.hidden = !n; });
+    var r = unreadCount('received'), s = unreadCount('sent');
+    var br = $('#badge-received'), bs = $('#badge-sent');
+    if (br) { br.textContent = r; br.hidden = !r; }
+    if (bs) { bs.textContent = s; bs.hidden = !s; }
+    document.title = (n ? '(' + n + ') ' : '') + BASE_TITLE;
+  }
+  var offersLoaded = false;
+  async function refreshOffers(quiet) {
+    if (!api.user) { S.offers = []; S.pending = 0; S.unread = {}; offersLoaded = false; renderBadge(); return; }
     try {
-      S.offers = await api.myOffers();
+      var res = await Promise.all([api.myOffers(), api.unreadOffers().catch(function () { return null; })]);
+      S.offers = res[0];
       S.pending = S.offers.filter(function (o) { return o.role === 'received' && o.status === 'pending'; }).length;
+      if (res[1]) {
+        var prev = S.unread || {}, next = {}, fresh = 0;
+        res[1].forEach(function (id) { next[id] = true; if (!prev[id]) fresh++; });
+        // lo que se está leyendo ahora mismo en la conversación abierta no cuenta como pendiente
+        S.unread = next;
+        if (offersLoaded && fresh && !quiet) toast(fresh === 1 ? 'Tienes una novedad en tus propuestas.' : 'Tienes ' + fresh + ' novedades en tus propuestas.');
+        offersLoaded = true;
+      }
     } catch (e) { /* el aviso no es crítico */ }
     renderBadge();
+    if (location.hash === '#propuestas' && $('#view-inbox') && !$('#view-inbox').hidden) renderInbox();
+    noticeInThread();
   }
+  // Aviso dentro de una conversación abierta cuando llega algo nuevo
+  function noticeInThread() {
+    var dlg = $('#dlg-thread');
+    if (!dlg || !dlg.open || !S.thread) return;
+    var n = $('#t-news');
+    if (n) n.hidden = !S.unread[S.thread.id];
+  }
+  function markThreadRead(id) {
+    if (!S.unread[id]) { api.markRead(id).catch(function () {}); return; }
+    delete S.unread[id];
+    renderBadge();
+    if (location.hash === '#propuestas') renderInbox();
+    api.markRead(id).catch(function () {});
+  }
+  // Comprobación periódica: cada 30 s y al volver a la pestaña
+  setInterval(function () { if (api.user && !document.hidden) refreshOffers(); }, 30000);
+  document.addEventListener('visibilitychange', function () { if (api.user && !document.hidden) refreshOffers(); });
+  window.addEventListener('focus', function () { if (api.user) refreshOffers(); });
 
   function showBanner() {
     var b = $('#banner');
@@ -732,7 +773,8 @@
     box.innerHTML = rows.map(function (o) {
       var st = OST[o.status] || OST.pending;
       var who = o.role === 'received' ? aliasLink(o.other_alias) + ' te ofrece: <b>' + esc(o.offer_text) + '</b>' : 'Tú ofreces: <b>' + esc(o.offer_text) + '</b> a ' + aliasLink(o.other_alias);
-      return '<article class="row plain"><div><h3>' + esc(o.listing_title) + '</h3><p class="sub"><span class="st ' + st[1] + '">' + st[0] + '</span>' + who + ' · ' + ago(o.created_at) + '</p></div>' +
+      var isNew = !!S.unread[o.id];
+      return '<article class="row plain' + (isNew ? ' unread' : '') + '"><div><h3>' + esc(o.listing_title) + '</h3><p class="sub">' + (isNew ? '<span class="st new">Nuevo</span>' : '') + '<span class="st ' + st[1] + '">' + st[0] + '</span>' + who + ' · ' + ago(o.created_at) + '</p></div>' +
         '<div class="acts"><button class="btn sm" type="button" data-offer="' + esc(o.id) + '">Abrir</button></div></article>';
     }).join('');
   }
@@ -806,7 +848,8 @@
     var hint = o.status === 'accepted' ? '<p class="note">Propuesta aceptada. Acordad lugar y hora aquí. Quedad en un sitio público, comprobad el artículo antes de cambiar y no compartáis datos bancarios. Cuando cerréis el trueque, marca el anuncio como «cambiado» desde «Mis anuncios».</p>' : '';
     body.innerHTML =
       '<div class="dlg-head"><h2 id="t-title">' + esc(o.listing_title) + '</h2><button class="x" type="button" data-close aria-label="Cerrar">' + CLOSE_SVG + '</button></div>' +
-      '<p class="sub" style="color:var(--muted)"><span class="st ' + st[1] + '">' + st[0] + '</span>Con <b>' + aliasLink(o.other_alias) + '</b></p>' + hint +
+      '<p class="sub" style="color:var(--muted)"><span class="st ' + st[1] + '">' + st[0] + '</span>Con <b>' + aliasLink(o.other_alias) + '</b></p>' +
+      '<p class="note news" id="t-news" role="status" hidden>Hay novedades en esta conversación. <button class="linkbtn" type="button" data-t="refresh">Verlas ahora</button></p>' + hint +
       (loadErr ? '<p class="err">' + esc(loadErr) + '</p>' : '') +
       '<div class="thread" id="thread-list" tabindex="0" aria-label="Conversación">' + first + list + '</div>' +
       (acts ? '<div class="row-start">' + acts + '</div>' : '') +
@@ -823,6 +866,7 @@
     var tl = $('#thread-list', body);
     if (tl) tl.scrollTop = tl.scrollHeight;
     if ($('#t-body')) { $('#t-body').value = draft.text; renderDraftChips(); }
+    if (!loadErr) markThreadRead(o.id);
   }
   $('#thread-body').addEventListener('click', async function (e) {
     var b = e.target.closest('[data-t]');
@@ -854,7 +898,11 @@
       return;
     }
     try {
-      if (a === 'refresh') { await renderThread(); return; }
+      if (a === 'refresh') {
+        await refreshOffers(true);
+        S.thread = S.offers.filter(function (x) { return x.id === o.id; })[0] || o;
+        await renderThread(); return;
+      }
       var map = { accept: 'accepted', decline: 'declined', withdraw: 'withdrawn' };
       if (a === 'decline' || a === 'withdraw') {
         var ok = await askConfirm({ title: a === 'decline' ? '¿Rechazar esta propuesta?' : '¿Retirar tu propuesta?', text: 'La conversación se cierra y no se puede reabrir.', ok: a === 'decline' ? 'Rechazar' : 'Retirar', danger: true });
@@ -901,7 +949,20 @@
     var u = api.user;
     $('#acc-alias').textContent = u.alias;
     $('#acc-email').textContent = u.email;
+    var cb = $('#acc-notify');
+    if (cb) {
+      cb.disabled = true;
+      api.getNotifyPref().then(function (on) { cb.checked = on; cb.disabled = false; }).catch(function () { cb.checked = true; cb.disabled = false; });
+    }
   }
+  $('#view-account').addEventListener('change', async function (e) {
+    if (e.target.id !== 'acc-notify') return;
+    var cb = e.target, want = cb.checked;
+    cb.disabled = true;
+    try { await api.setNotifyPref(want); toast(want ? 'Te avisaremos por correo.' : 'No te enviaremos más avisos por correo.'); }
+    catch (ex) { cb.checked = !want; toast(api.niceError(ex)); }
+    cb.disabled = false;
+  });
   $('#view-account').addEventListener('click', async function (e) {
     var b = e.target.closest('[data-acc]');
     if (!b) return;
@@ -923,7 +984,7 @@
         var ok = await askConfirm({ title: '¿Borrar tu cuenta?', text: 'Se borran tu perfil, tus anuncios, tus fotos, tus propuestas y tus mensajes. No se puede deshacer.', ok: 'Borrar mi cuenta', danger: true, typed: 'BORRAR' });
         if (!ok) return;
         await api.deleteAccount();
-        S.offers = []; S.pending = 0;
+        S.offers = []; S.pending = 0; S.unread = {};
         renderHeader();
         toast('Tu cuenta se ha borrado.');
         await reloadAll();

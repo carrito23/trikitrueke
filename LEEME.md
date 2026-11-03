@@ -38,3 +38,16 @@ En `aviso-legal.html`, `privacidad.html`, `cookies.html` y `normas.html` busca l
 1. Supabase → SQL Editor → pega `schema.sql` entero → Run (se puede repetir sin riesgo; añade lo nuevo y no borra datos).
 2. En GitHub, sube los archivos nuevos **sin tocar tu `config.js`** (el de tus claves).
 3. Recarga con Ctrl+F5.
+
+## Avisos por correo de propuestas y mensajes (una sola vez)
+La web avisa dentro de la propia página (contador, título de la pestaña, filas «Nuevo») y, además, por correo. El correo sale de `info@trikitrueke.es` a través de Brevo. Sin la clave de Brevo la web funciona igual, solo que no envía correos.
+1. Crea una cuenta en https://www.brevo.com y valida el remitente `info@trikitrueke.es` (y, si te lo pide, autentica el dominio añadiendo los registros DNS en Strato). Sin esto los correos pueden caer en spam o rechazarse. Comprueba en Brevo los límites de envío gratuito vigentes.
+2. Brevo → *SMTP y API* → *Claves API* → crea una clave.
+3. Supabase → *Database → Extensions* → activa **pg_net**.
+4. Supabase → SQL Editor → ejecuta `schema.sql` (si no lo has hecho ya con esta versión).
+5. Guarda la clave, solo en Supabase (nunca en GitHub ni en el chat), ejecutando esto con tu clave real:
+   `insert into public.app_secrets (name, value) values ('brevo_api_key','TU-CLAVE') on conflict (name) do update set value = excluded.value;`
+6. Prueba con dos cuentas: una propone, la otra debe recibir el correo.
+- Límites incorporados: máximo 30 correos al día por persona y, para mensajes, 1 correo cada 30 minutos por conversación.
+- Desactivar todos los correos: `delete from public.app_secrets where name='brevo_api_key';`
+- Cada persona puede darse de baja en *Mi cuenta → Avisos por correo*.

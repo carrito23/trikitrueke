@@ -379,6 +379,32 @@
       });
       if (r.error) throw r.error;
     };
+    /* ---- novedades (qué conversaciones tienen algo sin ver) ---- */
+    api.unreadOffers = async function () {
+      var r = await sb.from('my_offer_unread').select('offer_id,unread');
+      if (r.error) throw r.error;
+      return (r.data || []).filter(function (x) { return x.unread === true; }).map(function (x) { return x.offer_id; });
+    };
+    api.markRead = async function (offerId) {
+      var r = await sb.from('offer_reads').insert({ user_id: api.user.id, offer_id: offerId });
+      if (r.error) {
+        // ya existía: se actualiza (la hora la pone el servidor)
+        var u = await sb.from('offer_reads').update({ last_read_at: new Date().toISOString() }).eq('user_id', api.user.id).eq('offer_id', offerId);
+        if (u.error) throw u.error;
+      }
+    };
+    api.getNotifyPref = async function () {
+      var r = await sb.from('notification_prefs').select('email_on').eq('user_id', api.user.id).maybeSingle();
+      if (r.error) throw r.error;
+      return r.data ? r.data.email_on !== false : true;
+    };
+    api.setNotifyPref = async function (on) {
+      var r = await sb.from('notification_prefs').insert({ user_id: api.user.id, email_on: !!on });
+      if (r.error) {
+        var u = await sb.from('notification_prefs').update({ email_on: !!on }).eq('user_id', api.user.id);
+        if (u.error) throw u.error;
+      }
+    };
     api.myOffers = async function () {
       var r = await sb.from('offers')
         .select('id,listing_id,from_user,offer_text,message,status,created_at,profiles(alias),listings(title,user_id,profiles(alias))')
@@ -692,6 +718,27 @@
       offers.push({ id: uuid(), listing_id: o.listing_id, from_user: api.user.id, offer_text: o.offer_text, message: o.message || '', status: 'pending', created_at: new Date().toISOString() });
       return delay();
     };
+    var reads = {}, notifyOn = true;
+    api.unreadOffers = function () {
+      var me = api.user.id, out = [];
+      offers.forEach(function (o) {
+        var l = find(o.listing_id);
+        if (!l) return;
+        var sent = o.from_user === me, recv = l.user_id === me;
+        if (!sent && !recv) return;
+        var t = '';
+        function up(x) { if (x && x > t) t = x; }
+        var changed = o.updated_at || o.created_at;
+        if (recv) { up(o.created_at); if (o.status === 'withdrawn') up(changed); }
+        if (sent && (o.status === 'accepted' || o.status === 'declined')) up(changed);
+        messages.forEach(function (m) { if (m.offer_id === o.id && m.sender_id !== me) up(m.created_at); });
+        if (t && t > (reads[me + '|' + o.id] || '')) out.push(o.id);
+      });
+      return delay(out);
+    };
+    api.markRead = function (offerId) { reads[api.user.id + '|' + offerId] = new Date().toISOString(); return delay(); };
+    api.getNotifyPref = function () { return delay(notifyOn); };
+    api.setNotifyPref = function (on) { notifyOn = !!on; return delay(); };
     api.myOffers = function () {
       var me = api.user.id;
       var out = [];
@@ -725,7 +772,7 @@
     api.setOfferStatus = function (id, status) {
       var o = offers.filter(function (x) { return x.id === id; })[0];
       if (!o) return fail('No tienes permiso para hacer esto.');
-      o.status = status; return delay();
+      o.status = status; o.updated_at = new Date().toISOString(); return delay();
     };
 
     api.createReport = function (o) {
