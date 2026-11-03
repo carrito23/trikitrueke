@@ -407,7 +407,7 @@
     };
     api.myOffers = async function () {
       var r = await sb.from('offers')
-        .select('id,listing_id,from_user,offer_text,message,status,created_at,profiles(alias),listings(title,user_id,profiles(alias))')
+        .select('id,listing_id,from_user,offer_text,message,status,created_at,profiles!offers_from_user_fkey(alias),listings(title,user_id,profiles(alias))')
         .order('created_at', { ascending: false });
       if (r.error) throw r.error;
       var me = api.user.id;
