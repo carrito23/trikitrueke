@@ -168,6 +168,10 @@
     if (br) { br.textContent = r; br.hidden = !r; }
     if (bs) { bs.textContent = s; bs.hidden = !s; }
     document.title = (n ? '(' + n + ') ' : '') + BASE_TITLE;
+    // Marca en el icono de la app instalada (si el móvil o el navegador lo permiten)
+    try {
+      if (navigator.setAppBadge) { (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(function () {}); }
+    } catch (e) { /* no es crítico */ }
   }
   var offersLoaded = false;
   async function refreshOffers(quiet) {
@@ -1166,6 +1170,7 @@
   async function boot() {
     showBanner();
     if (api.mode === 'broken') { $('#grid').innerHTML = ''; $('#count').textContent = ''; return; }
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
     try { await api.init(); } catch (e) { console.error(e); }
     showBanner();
     renderHeader();
